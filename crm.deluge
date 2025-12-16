@@ -1,0 +1,227 @@
+string standalone.orderCourseWebhook(Map crmAPIRequest)
+{
+info "=== orderCourseWebhook START (Refactored) ===";
+// 1. استقبال البيانات
+data = crmAPIRequest.get("body");
+status = ifnull(data.get("status"),"").toLowerCase().trim();
+info "Order Status: " + status;
+billing = ifnull(data.get("billing"),Map());
+first_name = ifnull(billing.get("first_name"),"");
+last_name = ifnull(billing.get("last_name"),"Unknown");
+email = ifnull(billing.get("email"),"");
+phone = ifnull(billing.get("phone"),"");
+country = ifnull(billing.get("country"),"");
+amountStr = ifnull(data.get("total"),"0");
+amountVal = amountStr.toDecimal();
+order_id = ifnull(data.get("id"),"").toString();
+info "Incoming Order ID: " + order_id;
+payment_method_title = ifnull(data.get("payment_method_title"),"");
+currency = ifnull(data.get("currency"),"");
+date_buy = zoho.currentdate.toString("yyyy-MM-dd");
+date_sign = zoho.currentdate.toString("yyyy-MM-dd");
+// 2. المنطق الذكي (Bundle vs Single)
+line_items = ifnull(data.get("line_items"),List());
+paid_items_list = List();
+free_items_list = List();
+all_skus_list = List();
+for each  item in line_items
+{
+	item_name = ifnull(item.get("name"),"");
+	item_sku = ifnull(item.get("sku"),"");
+	item_total = ifnull(item.get("total"),"0").toDecimal();
+	if(item_sku != "")
+	{
+		all_skus_list.add(item_sku);
+	}
+	if(item_total > 0)
+	{
+		paid_items_list.add(item_name);
+	}
+	else
+	{
+		free_items_list.add(item_name);
+	}
+}
+final_package_name = "";
+final_order_details = "";
+if(free_items_list.size() > 0)
+{
+	info "Detected Type: BUNDLE";
+	if(paid_items_list.size() > 0)
+	{
+		final_package_name = paid_items_list.get(0);
+	}
+	else
+	{
+		final_package_name = "Unknown Bundle";
+	}
+	final_order_details = free_items_list.toString(" || ");
+}
+else
+{
+	info "Detected Type: SINGLE COURSES";
+	final_order_details = paid_items_list.toString(" || ");
+	final_package_name = paid_items_list.toString(" || ");
+}
+skus_str = all_skus_list.toString(" || ");
+// 3. تجهيز بيانات العميل
+contactData = {"Company":"Hesham Tarek","Owner":{"id":7066472000000575001},"Account_Name":{"id":7066472000000690368},"Lead_Source":"WebSite","First_Name":first_name,"Last_Name":last_name,"Email":email,"Phone":phone,"Country":country};
+isExist = zoho.crm.searchRecords("Contacts","(Email:equals:" + email + ")");
+contactId = null;
+shouldIncrementBuyCount = false;
+if(!isNull(isExist) && isExist.size() > 0)
+{
+	existRecord = isExist.get(0);
+	contactId = existRecord.get("id");
+	info "Contact Found: " + contactId;
+	last_recorded_order_id = ifnull(existRecord.get("Order_Id"),"").toString();
+	info "Last Recorded Order ID: " + last_recorded_order_id;
+	if(status == "completed" || status == "processing" || status == "on-hold" || status == "canceled" || status == "failed")
+	{
+		if(last_recorded_order_id != order_id)
+		{
+			info ">>> New Order Detected - Starting Calculations...";
+			old_total = ifnull(existRecord.get("Total_Payments"),"0").toDecimal();
+			new_total = old_total + amountVal;
+			old_items = ifnull(existRecord.get("Order_Items"),"");
+			if(old_items != "")
+			{
+				merged_items = old_items + " || " + skus_str;
+			}
+			else
+			{
+				merged_items = skus_str;
+			}
+			old_details = ifnull(existRecord.get("Order_Details"),"");
+			if(old_details != "")
+			{
+				merged_details = old_details + " || " + final_order_details;
+			}
+			else
+			{
+				merged_details = final_order_details;
+			}
+			old_package = ifnull(existRecord.get("Package"),"");
+			if(old_package != "")
+			{
+				merged_package = old_package + " || " + final_package_name;
+			}
+			else
+			{
+				merged_package = final_package_name;
+			}
+			if(status == "completed")
+			{
+				contactData.put("Order_Details",merged_details);
+				contactData.put("Order_Items",merged_items);
+				contactData.put("Package",merged_package);
+				contactData.put("Order_Id",order_id);
+				contactData.put("Total_Payments",new_total);
+				contactData.put("Buy_At",date_buy);
+				contactData.put("Currency_Type",currency);
+				contactData.put("Payment_Method",payment_method_title);
+				contactData.put("Amount",amountVal);
+				contactData.put("User_State","paid");
+				shouldIncrementBuyCount = true;
+			}
+		}
+	}
+	updateResp = zoho.crm.updateRecord("Contacts",contactId.toLong(),contactData);
+	info "Update Response: " + updateResp;
+}
+else
+{
+	info "Creating New Contact...";
+	contactData.put("Sign_At",date_sign);
+	if(status == "completed" || status == "processing" || status == "on-hold")
+	{
+		if(status == "completed")
+		{
+			contactData.put("Buy_At",date_buy);
+			contactData.put("Total_Payments",amountVal);
+			contactData.put("Order_Id",order_id);
+			contactData.put("Order_Items",skus_str);
+			contactData.put("Order_Details",final_order_details);
+			contactData.put("Package",final_package_name);
+			contactData.put("Currency_Type",currency);
+			contactData.put("Payment_Method",payment_method_title);
+			contactData.put("Amount",amountVal);
+			contactData.put("User_State","paid");
+			shouldIncrementBuyCount = true;
+		}
+	}
+	createResp = zoho.crm.createRecord("Contacts",contactData);
+	if(!isNull(createResp.get("id")))
+	{
+		contactId = createResp.get("id");
+	}
+}
+// 4. DEAL HANDLING (Simplified)
+dealName = "Order #" + order_id;
+// Map order status to desired deal Stage and User_State
+stageValue = "Waiting";
+userStateDeal = "Lead";
+if(status == "completed")
+{
+	stageValue = "Closed Won";
+	userStateDeal = "Paid";
+}
+else if(status == "processing" || status == "on-hold" || status == "waiting")
+{
+	stageValue = "Waiting";
+	userStateDeal = "Lead";
+}
+else if(status == "canceled" || status == "failed")
+{
+	stageValue = "Canceled Payment";
+	userStateDeal = "Lead";
+}
+// Search for existing deal by deal name
+dealSearch = zoho.crm.searchRecords("Deals","(Deal_Name:equals:" + dealName + ")");
+dealData = {"Deal_Name":dealName,"Owner":{"id":7066472000000575001},"Account_Name":{"id":7066472000000690368},"Lead_Source":"WebSite","Email":email,"Phone":phone,"Order_Id":order_id,"Order_Items":skus_str,"Order_Details":final_order_details,"Package":final_package_name,"Amount":amountVal,"Currency_Type":currency,"Payment_Method":payment_method_title,"Pipeline":"Before sale","Stage":stageValue,"User_State":userStateDeal};
+if(!isNull(contactId))
+{
+	dealData.put("Contact_Name",contactId.toLong());
+}
+if(isNull(dealSearch) || dealSearch.size() == 0)
+{
+	info "Creating New Deal...";
+	dealData.put("Sign_At",date_sign);
+	if(status == "completed")
+	{
+		dealData.put("Buy_At",date_buy);
+	}
+	createDealResp = zoho.crm.createRecord("Deals",dealData);
+	info "Deal Created: " + createDealResp;
+}
+else
+{
+	info "Updating Existing Deal...";
+	dealId = dealSearch.get(0).get("id");
+	updateData = {"Stage":stageValue,"User_State":userStateDeal,"Order_Items":skus_str,"Order_Details":final_order_details,"Package":final_package_name,"Amount":amountVal,"Currency_Type":currency,"Payment_Method":payment_method_title};
+	if(status == "completed")
+	{
+		updateData.put("Buy_At",date_buy);
+	}
+	updateDealResp = zoho.crm.updateRecord("Deals",dealId.toLong(),updateData);
+	info "Deal Updated: " + updateDealResp;
+}
+// 5. Increment Buy Count if deal is Closed Won
+if(stageValue == "Closed Won" && shouldIncrementBuyCount && !isNull(contactId))
+{
+	info "Deal stage is Closed Won - Incrementing Buy Count...";
+	contactRecord = zoho.crm.getRecordById("Contacts",contactId.toLong());
+	currentBuyCount = ifnull(contactRecord.get("Buy_Count"),null);
+	newBuyCount = 1;
+	if(!isNull(currentBuyCount))
+	{
+		newBuyCount = currentBuyCount.toNumber() + 1;
+	}
+	info "Current Buy Count: " + currentBuyCount + " | New Buy Count: " + newBuyCount;
+	buyCountUpdate = {"Buy_Count":newBuyCount};
+	updateBuyCountResp = zoho.crm.updateRecord("Contacts",contactId.toLong(),buyCountUpdate);
+	info "Buy Count Update Response: " + updateBuyCountResp;
+}
+info "=== orderCourseWebhook END ===";
+return "Done";
+}

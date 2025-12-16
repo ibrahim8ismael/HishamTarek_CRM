@@ -1,0 +1,78 @@
+string standalone.AppUsers(Map crmAPIRequest)
+{
+// Extract data from API request
+data = crmAPIRequest.get("body");
+if(isNull(data))
+{
+	data = crmAPIRequest;
+}
+phone = data.get("Phone1");
+email = data.get("SchoolName");
+//     leadSource = data.get("LeadSource");
+signDate = data.get("RegisterDate");
+name = data.get("Name");
+date_sign = zoho.currentdate.toString("yyyy-MM-dd");
+// Validate required fields
+if(isNull(email) || email == "")
+{
+	return "Error: Email is required";
+}
+if(isNull(name) || name == "")
+{
+	return "Error: Name is required";
+}
+// ======================
+// Handle Contact (Create or Update)
+// ======================
+contactData = {"Company":"Hesham Tarek","Owner":{"id":7066472000000575001},"Account_Name":{"id":7066472000000690368},"Lead_Source":"Mobile App","Phone":phone,"Email":email,"Last_Name":name};
+contactId = null;
+isExist = zoho.crm.searchRecords("Contacts","(Email:equals:" + email + ")");
+if(!isNull(isExist) && isExist.size() > 0)
+{
+	contactId = isExist.get(0).get("id");
+	updateResp = zoho.crm.updateRecord("Contacts",contactId.toLong(),contactData);
+	info "Contact updated:";
+	info updateResp;
+}
+else
+{
+	contactData.put("Sign_At",date_sign);
+	createResp = zoho.crm.createRecord("Contacts",contactData);
+	info "New contact created:";
+	info createResp;
+	if(createResp.containKey("id"))
+	{
+		contactId = createResp.get("id");
+	}
+}
+// ======================
+// Handle Deal - NO DUPLICATES!
+// ======================
+if(!isNull(contactId))
+{
+	// FIRST: Check if deal already exists for this contact
+	dealSearchCriteria = "(Contact_Name:equals:" + contactId + ")";
+	existingDeals = zoho.crm.searchRecords("Deals",dealSearchCriteria);
+	if(isNull(existingDeals) || existingDeals.size() == 0)
+	{
+		// NO deal exists - CREATE new one
+		dealData = Map();
+		dealData.put("Deal_Name",name);
+		dealData.put("Email",email);
+		dealData.put("Stage","Mobile Lead");
+		dealData.put("Pipeline","Before sale");
+		dealData.put("Contact_Name",{"id":contactId});
+		dealData.put("Lead_Source","Mobile App");
+		createDeal = zoho.crm.createRecord("Deals",dealData);
+		info "Deal created:";
+		info createDeal;
+	}
+	else
+	{
+		// Deal ALREADY EXISTS - DO NOT create duplicate
+		info "Deal already exists for this contact - NO duplicate created";
+		info existingDeals.get(0);
+	}
+}
+return "Data received";
+}
