@@ -171,7 +171,7 @@ else if(status == "processing" || status == "on-hold" || status == "waiting")
 	stageValue = "Waiting";
 	userStateDeal = "Lead";
 }
-else if(status == "canceled" || status == "failed")
+else if(status == "cancelled" || status == "failed")
 {
 	stageValue = "Canceled Payment";
 	userStateDeal = "Lead";
