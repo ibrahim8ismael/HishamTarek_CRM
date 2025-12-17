@@ -1,0 +1,72 @@
+string standalone.WebsiteFormLeads(String crmAPIRequest)
+{
+// Extract data from API request
+data = crmAPIRequest.get("body");
+fname = data.get("first_name");
+lname = data.get("last_name");
+phone = data.get("phone");
+email = data.get("email");
+date_sign = zoho.currentdate.toString("yyyy-MM-dd");
+if(isNull(email) || email == "")
+{
+	return "Error: Email is required";
+}
+if(isNull(lname) || lname == "")
+{
+	return "Error: Name is required";
+}
+// ======================
+// Handle Contact (Create or Update)
+// ======================
+contactData = {"Company":"Hesham Tarek","Owner":{"id":7066472000000575001},"Account_Name":{"id":7066472000000690368},"Lead_Source":"Web Form","Phone":phone,"Email":email,"Last_Name":lname,"First_Name":fname};
+contactId = null;
+isExist = zoho.crm.searchRecords("Contacts","(Email:equals:" + email + ")");
+if(!isNull(isExist) && isExist.size() > 0)
+{
+	contactId = isExist.get(0).get("id");
+	updateResp = zoho.crm.updateRecord("Contacts",contactId.toLong(),contactData);
+	info "Contact updated:";
+	info updateResp;
+}
+else
+{
+	contactData.put("Sign_At",date_sign);
+	createResp = zoho.crm.createRecord("Contacts",contactData);
+	info "New contact created:";
+	info createResp;
+	if(createResp.containKey("id"))
+	{
+		contactId = createResp.get("id");
+	}
+}
+// ======================
+// Handle Deal - NO DUPLICATES!
+// ======================
+if(!isNull(contactId))
+{
+	// FIRST: Check if deal already exists for this contact
+	dealSearchCriteria = "(Contact_Name:equals:" + contactId + ")";
+	existingDeals = zoho.crm.searchRecords("Deals",dealSearchCriteria);
+	if(isNull(existingDeals) || existingDeals.size() == 0)
+	{
+		// NO deal exists - CREATE new one
+		dealData = Map();
+		dealData.put("Deal_Name",fname + " " + lname);
+		dealData.put("Email",email);
+		dealData.put("Stage","Web Lead");
+		dealData.put("Pipeline","Before sale");
+		dealData.put("Contact_Name",{"id":contactId});
+		dealData.put("Lead_Source","Web Form");
+		createDeal = zoho.crm.createRecord("Deals",dealData);
+		info "Deal created:";
+		info createDeal;
+	}
+	else
+	{
+		// Deal ALREADY EXISTS - DO NOT create duplicate
+		info "Deal already exists for this contact - NO duplicate created";
+		info existingDeals.get(0);
+	}
+}
+return "Data received";
+}
