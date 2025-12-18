@@ -74,6 +74,19 @@ if(!isNull(isExist) && isExist.size() > 0)
 	existRecord = isExist.get(0);
 	contactId = existRecord.get("id");
 	info "Contact Found: " + contactId;
+	
+	// Check if Lead_Source already has a value
+	existing_lead_source = ifnull(existRecord.get("Lead_Source"),"");
+	if(existing_lead_source != "")
+	{
+		info "Preserving existing Lead_Source: " + existing_lead_source;
+		contactData.remove("Lead_Source");
+	}
+	else
+	{
+		info "Lead_Source is empty, will set to: WebSite";
+	}
+	
 	last_recorded_order_id = ifnull(existRecord.get("Order_Id"),"").toString();
 	info "Last Recorded Order ID: " + last_recorded_order_id;
 	if(status == "completed" || status == "processing" || status == "on-hold" || status == "canceled" || status == "failed")
@@ -171,7 +184,7 @@ else if(status == "processing" || status == "on-hold" || status == "waiting")
 	stageValue = "Waiting";
 	userStateDeal = "Lead";
 }
-else if(status == "cancelled" || status == "failed")
+else if(status == "canceled" || status == "failed")
 {
 	stageValue = "Canceled Payment";
 	userStateDeal = "Lead";
